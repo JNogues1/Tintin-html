@@ -236,6 +236,18 @@
     .dialog-title span{display:block}
     .dialog-title .t{font-size:16px;font-weight:600;line-height:1.2}
     .dialog-title .s{font-size:13px;color:var(--text-2);margin-top:2px}
+    .form-dialog{max-width:min(520px,94vw)}
+    .form-dialog .dialog-card{padding:20px}
+    .form-dialog h2{margin:0 0 4px;font-size:18px;font-weight:600}
+    .form-dialog p{margin:0 0 14px;font-size:13px;color:var(--text-2);line-height:1.5}
+    .form-dialog p a{color:var(--accent)}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .form-grid label{display:block;font-size:12px;color:var(--text-2)}
+    .form-grid label span{display:block;margin-bottom:5px}
+    .form-grid .full{grid-column:1/-1}
+    .form-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px}
+    .form-actions .link{margin-right:auto;border:0;background:transparent;color:var(--text-2);font-size:13px;padding:0 4px;height:40px}
+    @media(max-width:760px){.form-grid{grid-template-columns:1fr}}
     .icon-button{width:36px;height:36px;border:1px solid var(--line-2);background:var(--surface);color:var(--text);display:grid;place-items:center;padding:0;transition:transform 120ms var(--ease-out),background 150ms ease}
     .icon-button:active{transform:scale(.94)}
     .icon-button:disabled{opacity:.4;cursor:default;transform:none}
@@ -380,6 +392,11 @@
       <div class="menu">
         <button class="button" id="moreMenu" type="button" aria-haspopup="true" aria-expanded="false">Más acciones <svg class="icon"><use href="#i-down"/></svg></button>
         <div class="menu-list" id="moreList">
+          <button type="button" id="publishGithub">Publicar en GitHub<small id="publishHint">Sube este HTML con tus datos al repositorio</small></button>
+          <button type="button" id="pullGithub">Traer datos de GitHub<small>Carga lo último publicado en el repositorio</small></button>
+          <button type="button" id="configGithub">Configurar GitHub<small>Repositorio y token de acceso</small></button>
+          <hr>
+          <button type="button" id="shareHtml" hidden>Compartir HTML con mis datos<small>AirDrop, Guardar en Archivos, correo</small></button>
           <button type="button" id="downloadHtml">Descargar copia HTML<small>Con tus datos y las portadas incrustadas</small></button>
           <button type="button" id="exportCsv">Exportar inventario a CSV<small>Para Excel o LibreOffice</small></button>
           <button type="button" id="exportJson">Exportar solo mis datos (JSON)<small>Copia de seguridad ligera, sin portadas</small></button>
@@ -437,6 +454,23 @@
         <button class="icon-button" type="button" id="dialogPrev" aria-label="Portada anterior"><svg class="icon"><use href="#i-left"/></svg></button>
         <button class="icon-button" type="button" id="dialogNext" aria-label="Portada siguiente"><svg class="icon"><use href="#i-right"/></svg></button>
         <button class="icon-button" id="dialogClose" type="button" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="githubDialog" class="form-dialog" aria-labelledby="githubTitle">
+    <div class="dialog-card">
+      <h2 id="githubTitle">Publicar en GitHub</h2>
+      <p>La app subirá el <code>index.html</code> con tus datos al repositorio, y GitHub Pages lo publicará en uno o dos minutos. Necesitas un token de acceso: en GitHub, <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Fine-grained tokens → Generate new token</a>, elige «Only select repositories» con este repositorio, y en <em>Repository permissions</em> da a <em>Contents</em> el nivel «Read and write». El token se guarda solo en este navegador; nunca viaja dentro del HTML publicado.</p>
+      <div class="form-grid">
+        <label class="full"><span>Repositorio (usuario/nombre)</span><input class="field" id="ghRepo" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="JNogues1/Tintin-html"></label>
+        <label><span>Rama</span><input class="field" id="ghBranch" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="main"></label>
+        <label><span>Archivo</span><input class="field" id="ghPath" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="index.html"></label>
+        <label class="full"><span>Token de acceso</span><input class="field" id="ghToken" type="password" autocomplete="off" placeholder="github_pat_…"></label>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="link" id="ghForget">Olvidar token</button>
+        <button type="button" class="button" id="ghCancel">Cancelar</button>
+        <button type="button" class="button primary" id="ghSave">Guardar</button>
       </div>
     </div>
   </dialog>
@@ -532,6 +566,8 @@
     const prefs = readJson(localStorage.getItem(PREFS_KEY)) || {};
 
     const record = id => state[id] || emptyRecord();
+    const githubReady = () => !!(prefs.github && prefs.github.repo && prefs.github.token);
+    const primaryAction = () => supportsFS ? "file" : githubReady() ? "github" : supportsShare ? "share" : "download";
     const isDirty = () => serialize(state) !== savedSnapshot;
 
     function persistLocal(){
@@ -560,14 +596,14 @@
       toast.textContent = message; toast.classList.toggle("error", Boolean(isError)); toast.classList.add("show");
       clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), isError ? 5000 : 2800);
     }
-    function refreshSaveState(status){
+    function refreshSaveState(status, custom){
       const where = savedWhere || currentFileName();
       let st = "saved", text, short;
-      if (status === "saving") { st = "saving"; text = "Guardando en " + where; short = "Guardando"; }
+      if (status === "saving") { st = "saving"; text = custom || ("Guardando en " + where); short = custom || "Guardando"; }
       else if (status === "error") { st = "error"; text = "No se pudo guardar. Prueba «Descargar copia HTML»"; short = "No se pudo guardar"; }
       else if (isDirty()) { st = "dirty"; text = "Cambios sin guardar en el HTML"; short = "Cambios sin guardar"; }
       else if (!savedAt) { text = "Sin guardar todavía en el archivo"; short = "Sin guardar todavía"; }
-      else { text = (isToday(savedAt) ? "Guardado hoy a las " + fmtTime(savedAt) : "Guardado el " + fmtDate(savedAt)) + " en " + where; short = isToday(savedAt) ? "Guardado a las " + fmtTime(savedAt) : "Guardado el " + fmtDate(savedAt).split(" a las ")[0]; }
+      else { const verb = savedWhere && savedWhere.includes("/") ? "Publicado" : "Guardado"; text = (isToday(savedAt) ? verb + " hoy a las " + fmtTime(savedAt) : verb + " el " + fmtDate(savedAt)) + " en " + where; short = isToday(savedAt) ? verb + " a las " + fmtTime(savedAt) : verb + " el " + fmtDate(savedAt).split(" a las ")[0]; }
       document.querySelectorAll(".js-save-state").forEach(el => { el.dataset.status = st; el.textContent = el.closest(".mobile-bar") ? short : text; });
     }
     function markChanged(){ persistLocal(); refreshSaveState(); scheduleAutosave(); }
@@ -593,6 +629,8 @@
       clone.querySelector("#moreList").classList.remove("open");
       clone.querySelector("#moreMenu").setAttribute("aria-expanded", "false");
       clone.querySelector("#coverDialog").removeAttribute("open");
+      clone.querySelector("#githubDialog").removeAttribute("open");
+      clone.querySelector("#shareHtml").setAttribute("hidden", ""); clone.querySelector("#publishGithub").removeAttribute("hidden");
       clone.querySelector("#dialogImage").removeAttribute("src");
       clone.querySelector("#toast").className = "toast";
       clone.querySelectorAll(".js-save-btn").forEach(b => b.removeAttribute("disabled"));
@@ -642,7 +680,10 @@
 
     let saving = false;
     async function saveToFile(){
-      if (!supportsFS) { if (supportsShare) await shareCopy(); else downloadCopy(); return; }
+      const action = primaryAction();
+      if (action === "github") { await publishToGithub(); return; }
+      if (action === "share") { await shareCopy(); return; }
+      if (action === "download") { downloadCopy(); return; }
       if (saving) return;
       saving = true;
       const buttons = document.querySelectorAll(".js-save-btn"); buttons.forEach(b => b.disabled = true);
@@ -695,6 +736,99 @@
         downloadCopy();
       }
     }
+
+    /* ============================================================
+       GITHUB: publicar el HTML en el repositorio (Contents API) y traer lo publicado
+       ============================================================ */
+    function toBase64(text){
+      const bytes = new TextEncoder().encode(text); let bin = ""; const CH = 0x8000;
+      for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      return btoa(bin);
+    }
+    function githubDefaults(){
+      const g = prefs.github || {};
+      let repo = g.repo || "";
+      if (!repo && /\.github\.io$/i.test(location.hostname)) { const seg = location.pathname.split("/").filter(Boolean)[0]; if (seg) repo = location.hostname.split(".")[0] + "/" + seg; }
+      return {repo, branch:g.branch || "main", path:g.path || "index.html", token:g.token || ""};
+    }
+    function openGithubDialog(){
+      const d = githubDefaults();
+      $("#ghRepo").value = d.repo; $("#ghBranch").value = d.branch; $("#ghPath").value = d.path; $("#ghToken").value = d.token;
+      $("#ghForget").hidden = !d.token;
+      $("#githubDialog").showModal();
+    }
+    $("#configGithub").addEventListener("click", openGithubDialog);
+    $("#ghCancel").addEventListener("click", () => $("#githubDialog").close());
+    $("#githubDialog").addEventListener("click", event => { if (event.target === $("#githubDialog")) $("#githubDialog").close(); });
+    $("#ghForget").addEventListener("click", () => { if (prefs.github) delete prefs.github.token; savePrefs(); $("#githubDialog").close(); applyCapabilities(); showToast("Token olvidado"); });
+    $("#ghSave").addEventListener("click", () => {
+      const repo = $("#ghRepo").value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, ""), token = $("#ghToken").value.trim();
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { showToast("Escribe el repositorio como usuario/nombre", true); return; }
+      if (!token) { showToast("Falta el token de acceso", true); return; }
+      prefs.github = {repo, branch:$("#ghBranch").value.trim() || "main", path:$("#ghPath").value.trim() || "index.html", token};
+      savePrefs(); $("#githubDialog").close(); applyCapabilities();
+      showToast("GitHub configurado. Ya puedes publicar.");
+    });
+    async function githubFetch(url, options){
+      const g = prefs.github;
+      const res = await fetch(url, {...options, headers:{"Accept":"application/vnd.github.object+json", "Authorization":"Bearer " + g.token, "X-GitHub-Api-Version":"2022-11-28", ...(options && options.headers || {})}});
+      if (!res.ok) {
+        let detail = ""; try { detail = (await res.json()).message || ""; } catch {}
+        const why = res.status === 401 ? "token no válido" : res.status === 403 ? "el token no tiene permiso de escritura en este repositorio" : res.status === 404 ? "repositorio, rama o archivo no encontrado (o el token no lo alcanza)" : detail || ("HTTP " + res.status);
+        throw new Error(why);
+      }
+      return res;
+    }
+    async function fetchPublishedState(){
+      const g = prefs.github || githubDefaults(); if (!g.repo) return null;
+      const res = await fetch(`https://raw.githubusercontent.com/${g.repo}/${g.branch}/${g.path}?t=${Date.now()}`, {cache:"no-store"});
+      if (!res.ok) return null;
+      const node = new DOMParser().parseFromString(await res.text(), "text/html").querySelector("#embedded-state");
+      return node ? parseState(readJson(node.textContent)) : null;
+    }
+    let publishing = false;
+    async function publishToGithub(){
+      if (!githubReady()) { openGithubDialog(); return; }
+      if (publishing) return;
+      publishing = true;
+      const buttons = document.querySelectorAll(".js-save-btn"); buttons.forEach(b => b.disabled = true);
+      const g = prefs.github, api = `https://api.github.com/repos/${g.repo}/contents/${g.path}`;
+      try {
+        refreshSaveState("saving", "Publicando en GitHub");
+        let remote = null; try { remote = await fetchPublishedState(); } catch {}
+        if (remote && remote.savedAt && savedAt && remote.savedAt > savedAt && serialize(remote.items) !== serialize(state)) {
+          if (!confirm(`En GitHub hay una versión publicada el ${fmtDate(remote.savedAt)}, posterior a la que tienes como base. ¿Sobrescribirla con los datos de este dispositivo?`)) { refreshSaveState(); return; }
+        }
+        let sha = null;
+        try { const cur = await githubFetch(`${api}?ref=${encodeURIComponent(g.branch)}`); sha = (await cur.json()).sha || null; } catch (error) { if (!/no encontrado/.test(error.message)) throw error; }
+        const stamp = new Date().toISOString();
+        const body = {message:"Actualiza la colección desde la app (" + stamp.slice(0, 16).replace("T", " ") + ")", content:toBase64(buildHtml(stamp)), branch:g.branch};
+        if (sha) body.sha = sha;
+        await githubFetch(api, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+        savedAt = stamp; savedSnapshot = serialize(state); savedWhere = g.repo;
+        persistLocal(); refreshSaveState();
+        showToast("Publicado en GitHub. La web se actualiza en uno o dos minutos.");
+      } catch (error) {
+        refreshSaveState("error"); showToast("No se pudo publicar: " + error.message, true);
+      } finally { publishing = false; buttons.forEach(b => b.disabled = false); }
+    }
+    async function pullFromGithub(){
+      const g = prefs.github || githubDefaults(); if (!g.repo) { openGithubDialog(); return; }
+      try {
+        showToast("Consultando GitHub");
+        const remote = await fetchPublishedState();
+        if (!remote || !Object.keys(remote.items).length) throw new Error("no se encontró el archivo publicado");
+        if (serialize(remote.items) === serialize(state)) { savedAt = remote.savedAt || savedAt; savedSnapshot = serialize(state); persistLocal(); refreshSaveState(); showToast("Ya tienes los mismos datos que GitHub"); return; }
+        const owned = Object.values(remote.items).filter(r => r.owned).length;
+        if (!confirm(`Lo publicado en GitHub${remote.savedAt ? " (" + fmtDate(remote.savedAt) + ")" : ""} marca ${owned} ejemplares como tuyos. ¿Sustituir los datos de este dispositivo por esos?`)) return;
+        state = remote.items; savedAt = remote.savedAt || savedAt; savedSnapshot = serialize(state);
+        rebuildRows(); render(); persistLocal(); refreshSaveState();
+        showToast("Datos traídos de GitHub");
+      } catch (error) { showToast("No se pudo traer de GitHub: " + error.message, true); }
+    }
+    $("#publishGithub").addEventListener("click", publishToGithub);
+    $("#pullGithub").addEventListener("click", pullFromGithub);
+    $("#shareHtml").addEventListener("click", shareCopy);
 
     let autosaveTimer;
     function scheduleAutosave(){
@@ -1053,18 +1187,24 @@
     /* ============================================================
        ARRANQUE
        ============================================================ */
+    function applyCapabilities(){
+      const action = primaryAction();
+      const labels = {file:"Guardar en este HTML", github:"Publicar en GitHub", share:"Compartir HTML con mis datos", download:"Descargar HTML con mis datos"};
+      document.querySelectorAll(".js-save-label").forEach(el => el.textContent = labels[action]);
+      $("#autosaveWrap").hidden = !supportsFS;
+      $("#shareHtml").hidden = !supportsShare || action === "share";
+      $("#publishGithub").hidden = action === "github";
+      $("#publishHint").textContent = githubReady() ? "Sube este HTML con tus datos a " + prefs.github.repo : "Primero hay que configurar el repositorio y el token";
+      $("#footLeft").textContent = action === "file" ? "Cada cambio queda en este navegador al instante. «Guardar en este HTML» lo escribe en el archivo."
+        : action === "github" ? "Tus cambios quedan en este dispositivo al instante. «Publicar en GitHub» sube el HTML con tus datos al repositorio y la web se actualiza sola."
+        : action === "share" ? "Tus cambios quedan guardados en este navegador. «Compartir» genera el HTML con tus datos para enviarlo por AirDrop al ordenador o guardarlo en Archivos."
+        : "Este navegador no puede sobrescribir el archivo: «Descargar» crea una copia nueva con tus datos. En Chrome o Edge se guarda directamente sobre este HTML.";
+    }
     (async function init(){
       applyTheme();
       buildShelf(); buildFlow(); rebuildRows(); updateLayoutClass(); if (flowMode) { $("#flow").hidden = false; $("#viewList").setAttribute("aria-pressed", "false"); $("#viewFlow").setAttribute("aria-pressed", "true"); } render(); persistLocal();
-      if (supportsShare) {
-        document.querySelectorAll(".js-save-label").forEach(el => el.textContent = "Compartir HTML con mis datos");
-        $("#autosaveWrap").hidden = true;
-        $("#footLeft").textContent = "Tus cambios quedan guardados en este navegador. «Compartir» genera el HTML con tus datos para enviarlo por AirDrop al ordenador o guardarlo en Archivos.";
-      } else if (!supportsFS) {
-        document.querySelectorAll(".js-save-label").forEach(el => el.textContent = "Descargar HTML con mis datos");
-        $("#autosaveWrap").hidden = true;
-        $("#footLeft").textContent = "Este navegador no puede sobrescribir el archivo: «Descargar» crea una copia nueva con tus datos. En Chrome o Edge se guarda directamente sobre este HTML.";
-      } else {
+      applyCapabilities();
+      if (supportsFS) {
         const handle = await idbGet(HANDLE_KEY());
         if (handle && await ensurePermission(handle, false)) { fileHandle = handle; savedWhere = handle.name; }
         else if (handle) savedWhere = handle.name;
